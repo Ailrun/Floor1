@@ -19,8 +19,8 @@ exp_EqWithNames ctx (Imp aa ab) (Imp ba bb) = exp_EqWithNames ctx aa ba && exp_E
 exp_EqWithNames ctx (Conj aa ab) (Conj ba bb) = exp_EqWithNames ctx aa ba && exp_EqWithNames ctx ab bb
 exp_EqWithNames ctx (Disj aa ab) (Disj ba bb) = exp_EqWithNames ctx aa ba && exp_EqWithNames ctx ab bb
 exp_EqWithNames ctx (Neg a) (Neg b) = exp_EqWithNames ctx a b
-exp_EqWithNames ctx (UniQ ag) (UniQ bg) = exp_EqWithNames (tail ctx) (ag (head ctx)) (bg (head ctx))
-exp_EqWithNames ctx (ExtQ ag) (ExtQ bg) = exp_EqWithNames (tail ctx) (ag (head ctx)) (bg (head ctx))
+exp_EqWithNames ctx (UniQ _ ag) (UniQ _ bg) = exp_EqWithNames (tail ctx) (ag (head ctx)) (bg (head ctx))
+exp_EqWithNames ctx (ExtQ _ ag) (ExtQ _ bg) = exp_EqWithNames (tail ctx) (ag (head ctx)) (bg (head ctx))
 exp_EqWithNames _ _ _ = False
 
 expEq :: forall n. (KnownNat n) => Exp n -> Exp n -> Bool
@@ -54,7 +54,7 @@ inProofContextHetro f ctx
     pm = Proxy @m
 
 expLifting :: Exp n -> Exp (1 + n)
-expLifting f = Exp $ runExp f . Vector.tail
+expLifting f = Exp (Vector.cons Nothing (expContext f)) $ runExp f . Vector.tail
 
 {-# ANN exp_varMap "HLint: ignore Use camelCase" #-}
 exp_varMap :: (v -> u) -> (u -> v) -> Exp_ v -> Exp_ u
@@ -65,8 +65,11 @@ exp_varMap fvu fuv (Imp a b) = Imp (exp_varMap fvu fuv a) (exp_varMap fvu fuv b)
 exp_varMap fvu fuv (Conj a b) = Conj (exp_varMap fvu fuv a) (exp_varMap fvu fuv b)
 exp_varMap fvu fuv (Disj a b) = Disj (exp_varMap fvu fuv a) (exp_varMap fvu fuv b)
 exp_varMap fvu fuv (Neg a) = Neg (exp_varMap fvu fuv a)
-exp_varMap fvu fuv (UniQ g) = UniQ (exp_varMap fvu fuv . g . fuv)
-exp_varMap fvu fuv (ExtQ g) = ExtQ (exp_varMap fvu fuv . g . fuv)
+exp_varMap fvu fuv (UniQ ms g) = UniQ ms (exp_varMap fvu fuv . g . fuv)
+exp_varMap fvu fuv (ExtQ ms g) = ExtQ ms (exp_varMap fvu fuv . g . fuv)
+
+deleteAt' :: (KnownNat n) => proxy n -> Vector (n + (1 + m)) a -> Vector (n + m) a
+deleteAt' pn (Vector.splitAt' pn -> (vs1, vs2)) = vs1 Vector.++ Vector.tail vs2
 
 insertAt' :: (KnownNat n) => proxy n -> Vector (n + m) a -> a -> Vector (n + (1 + m)) a
 insertAt' pn (Vector.splitAt' pn -> (vs1, vs2)) v = vs1 Vector.++ Vector.cons v vs2

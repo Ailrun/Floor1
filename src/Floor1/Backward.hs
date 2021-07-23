@@ -7,7 +7,6 @@ import           Data.Bool          (bool)
 import           Data.Either        (fromRight)
 import           Data.Proxy         (Proxy (Proxy))
 import           Data.Type.Equality
-import           Data.Vector.Sized  (Vector)
 import qualified Data.Vector.Sized  as Vector
 import           Floor1.Ast
 import           Floor1.Util
@@ -35,7 +34,7 @@ botE (ctx, f) (Unit c) =
 impI :: (KnownNat n) => InferenceRule n () (Unit (ProofGoal n))
 impI (ctx, f) _ =
   case runExp f (Vector.replicate ()) of
-    Imp _ _ -> Just $ Unit (Exp (impAntecedent . runExp f) : ctx, Exp (impConsequent . runExp f))
+    Imp _ _ -> Just $ Unit (f{ runExp = impAntecedent . runExp f } : ctx, f{ runExp = impConsequent . runExp f })
     _ -> Nothing
   where
     impAntecedent :: Exp_ a -> Exp_ a
@@ -46,13 +45,15 @@ impI (ctx, f) _ =
     impConsequent (Imp _ b) = b
     impConsequent _         = error "impI: impossible"
 
+-- | precondition: In @impE (ctx, f) (Unit g)@, @f@ and @g@ should share
+-- free variable names in exp context.
 impE :: InferenceRule n (Unit (Exp n)) (ProofGoal n, ProofGoal n)
-impE (ctx, g) (Unit f) = Just ((ctx, Exp $ \vs -> Imp (runExp f vs) (runExp g vs)) , (ctx, f))
+impE (ctx, f) (Unit g) = Just ((ctx, f{ runExp = Imp <$> runExp g <*> runExp f }) , (ctx, g))
 
 conjI :: (KnownNat n) => InferenceRule n () (ProofGoal n, ProofGoal n)
 conjI (ctx, f) _ =
   case runExp f (Vector.replicate ()) of
-    Conj _ _ -> Just ((ctx, Exp (conjLeftArg . runExp f)), (ctx, Exp (conjRightArg . runExp f)))
+    Conj _ _ -> Just ((ctx, f{ runExp = conjLeftArg . runExp f }), (ctx, f{ runExp = conjRightArg . runExp f }))
     _ -> Nothing
   where
     conjLeftArg :: Exp_ a -> Exp_ a
@@ -63,16 +64,20 @@ conjI (ctx, f) _ =
     conjRightArg (Conj _ b) = b
     conjRightArg _          = error "conjI: impossible"
 
+-- | precondition: In @conjE1 (ctx, f) (Unit g)@, @f@ and @g@ should share
+-- free variable names in exp context.
 conjE1 :: InferenceRule n (Unit (Exp n)) (Unit (ProofGoal n))
-conjE1 (ctx, f) (Unit g) = Just $ Unit (ctx, Exp $ \vs -> Conj (runExp f vs) (runExp g vs))
+conjE1 (ctx, f) (Unit g) = Just $ Unit (ctx, f{ runExp = Conj <$> runExp f <*> runExp g })
 
+-- | precondition: In @conjE2 (ctx, f) (Unit g)@, @f@ and @g@ should share
+-- free variable names in exp context.
 conjE2 :: InferenceRule n (Unit (Exp n)) (Unit (ProofGoal n))
-conjE2 (ctx, f) (Unit g) = Just $ Unit (ctx, Exp $ \vs -> Conj (runExp g vs) (runExp f vs))
+conjE2 (ctx, f) (Unit g) = Just $ Unit (ctx, f{ runExp = Conj <$> runExp g <*> runExp f })
 
 disjI1 :: (KnownNat n) => InferenceRule n () (Unit (ProofGoal n))
 disjI1 (ctx, f) _ =
   case runExp f (Vector.replicate ()) of
-    Disj _ _ -> Just $ Unit (ctx, Exp (disjLeftArg . runExp f))
+    Disj _ _ -> Just $ Unit (ctx, f{ runExp = disjLeftArg . runExp f })
     _        -> Nothing
   where
     disjLeftArg :: Exp_ a -> Exp_ a
@@ -82,20 +87,22 @@ disjI1 (ctx, f) _ =
 disjI2 :: (KnownNat n) => InferenceRule n () (Unit (ProofGoal n))
 disjI2 (ctx, f) _ =
   case runExp f (Vector.replicate ()) of
-    Disj _ _ -> Just $ Unit (ctx, Exp (disjRightArg . runExp f))
+    Disj _ _ -> Just $ Unit (ctx, f{ runExp = disjRightArg . runExp f })
     _        -> Nothing
   where
     disjRightArg :: Exp_ a -> Exp_ a
     disjRightArg (Conj _ b) = b
     disjRightArg _          = error "disj2: impossible"
 
+-- | precondition: In @conjE2 (ctx, f) (g, h)@, @g@ and @h@ should share
+-- free variable names in exp context.
 disjE :: InferenceRule n (Exp n, Exp n) (ProofGoal n, ProofGoal n, ProofGoal n)
-disjE (ctx, f) (g, h) = Just ((ctx, Exp $ \vs -> Disj (runExp g vs) (runExp h vs)) , (g : ctx, f) , (h : ctx, f))
+disjE (ctx, f) (g, h) = Just ((ctx, g{ runExp = Disj <$> runExp g <*> runExp h }) , (g : ctx, f) , (h : ctx, f))
 
 negI :: (KnownNat n) => InferenceRule n () (Unit (ProofGoal n))
 negI (ctx, f) () =
   case runExp f (Vector.replicate ()) of
-    Neg _ -> Just $ Unit (ctx, Exp (negArg . runExp f))
+    Neg _ -> Just $ Unit (ctx, f{ runExp = negArg . runExp f })
     _     -> Nothing
   where
     negArg :: Exp_ a -> Exp_ a
@@ -103,16 +110,16 @@ negI (ctx, f) () =
     negArg _       = error "negI: impossible"
 
 negE :: InferenceRule n (Unit (Exp n)) (ProofGoal n, ProofGoal n)
-negE (ctx, _) (Unit g) = Just ((ctx, Exp $ \vs -> Neg (runExp g vs)) , (ctx, g))
+negE (ctx, _) (Unit g) = Just ((ctx, g{ runExp = Neg . runExp g }) , (ctx, g))
 
 uniQI :: (KnownNat n) => InferenceRule n () (Unit (ProofGoal (1 + n)))
 uniQI (ctx, f) _ =
   case runExp f (Vector.replicate ()) of
-    UniQ _ -> Just $ Unit (expLifting <$> ctx, Exp $ \vs -> uniQArg (runExp f (Vector.tail vs)) (Vector.head vs))
+    UniQ ms _ -> Just $ Unit (expLifting <$> ctx, Exp (Vector.cons ms (expContext f)) $ uniQArg <$> runExp f . Vector.tail <*> Vector.head)
     _      -> Nothing
   where
     uniQArg :: Exp_ var -> (var -> Exp_ var)
-    uniQArg (UniQ g) = g
+    uniQArg (UniQ _ g) = g
     uniQArg _        = error "uniQI: impossible"
 
 -- | To eliminate universal quantifier, the variable of @n+1@-th
@@ -120,7 +127,7 @@ uniQI (ctx, f) _ =
 uniQE :: forall proxy n m. (KnownNat n, KnownNat (n + (1 + m))) => proxy n -> InferenceRule (n + (1 + m)) () (Unit (ProofGoal (n + m)))
 uniQE pn (ctx, f) _
   | Just ctx' <- traverse unlift ctx
-  = Just $ Unit (ctx', Exp $ UniQ . (runExp f .) . insertAt' pn)
+  = Just $ Unit (ctx', Exp (deleteAt' pn (expContext f)) $ UniQ Nothing . (runExp f .) . insertAt' pn)
   | otherwise = Nothing
   where
     unlift :: Exp (n + (1 + m)) -> Maybe (Exp (n + m))
@@ -136,7 +143,7 @@ uniQE pn (ctx, f) _
                 -- appear in @g@, as both @Right@/@Left@ @fv1@ versions
                 -- give the same 'Exp_'.
                 Just
-                $ Exp
+                $ Exp (deleteAt' pn (expContext g))
                 $ exp_varMap fromRightForce Right
                 . runExp g
                 . flip (insertAt' pn) (Left ())
@@ -162,13 +169,13 @@ extQI :: (KnownNat n, KnownNat m) => InferenceRule n (Unit (Proxy m)) (Unit (Pro
 extQI (ctx, f) (Unit pm)
   | Just m <- packFinite (natVal pm)
   = case runExp f (Vector.replicate ()) of
-      ExtQ _ -> Just $ Unit (ctx, Exp $ \vs -> extQArg (runExp f vs) (Vector.index vs m))
+      ExtQ _ _ -> Just $ Unit (ctx, f{ runExp = \vs -> extQArg (runExp f vs) (Vector.index vs m) })
       _      -> Nothing
   | otherwise = Nothing
   where
     extQArg :: Exp_ var -> (var -> Exp_ var)
-    extQArg (ExtQ g) = g
+    extQArg (ExtQ _ g) = g
     extQArg _        = error "extQI: impossible"
 
 extQE :: InferenceRule n (Unit (Exp (1 + n))) (ProofGoal n, ProofGoal (1 + n))
-extQE (ctx, f) (Unit g) = Just ((ctx, Exp $ ExtQ . (runExp g .) . flip Vector.cons), (g : fmap expLifting ctx, expLifting f))
+extQE (ctx, f) (Unit g) = Just ((ctx, Exp undefined $ ExtQ Nothing . (runExp g .) . flip Vector.cons), (g : fmap expLifting ctx, expLifting f))
