@@ -2,26 +2,23 @@
 {-# LANGUAGE ViewPatterns #-}
 module Floor1.Ast where
 
+import           Control.Applicative
 import           Control.Monad.State.Strict (State, evalState, state)
 import           Data.Finite                (Finite)
 import           Data.Kind
 import qualified Data.List                  as List
-import           Data.Proxy                 (Proxy (..))
-import           Data.Type.Equality
+import           Data.Maybe                 (fromMaybe)
+import           Data.Singletons.Decide
+import           Data.Singletons.Prelude
+import           Data.Singletons.TypeLits
 import           Data.Vector.Sized          (Vector)
 import qualified Data.Vector.Sized          as Vector
-import           GHC.TypeNats
 import           Text.Show.Functions        ()
-import Control.Applicative
-import Data.Maybe (fromMaybe)
 
 type VarContext = Vector
 
 varCtxAccess :: Vector n a -> Finite n -> a
 varCtxAccess = Vector.index
-
-type ProofContext n = [Exp n]
-type ProofGoal n = (ProofContext n, Exp n)
 
 data Exp_ var where
   Prop :: String -> [var] -> Exp_ var
@@ -41,9 +38,12 @@ type ExpContext n = Vector n (Maybe String)
 -- | Note: 'Exp' @0@ is a closed expression
 data Exp n
   = Exp
-    { expContext :: ExpContext n
-    , runExp :: forall var. VarContext n var -> Exp_ var
+    { expNum     :: SNat n
+    , expContext :: ExpContext n
+    , runExp     :: forall var. VarContext n var -> Exp_ var
     }
+
+data SomeExp = forall n. SomeExp (Exp n)
 
 emptyExpContext :: (KnownNat n) => ExpContext n
 emptyExpContext = Vector.replicate Nothing
@@ -59,7 +59,6 @@ data instance ExpArgPos 'Neg = NegArg
 data instance ExpArgPos 'UniQ = UniQArg
 data instance ExpArgPos 'ExtQ = ExtQArg
 
-type ExpPrec :: forall k. k -> Constraint
 class ExpPrec a where
   expPrec :: proxy a -> Int
 
@@ -81,25 +80,32 @@ instance ExpPrec 'Imp where
 
 instance ExpPrec 'Conj where
   expPrec _ = 2
+  {-# INLINEABLE expPrec #-}
 
 instance ExpPrec 'Disj where
   expPrec _ = 2
+  {-# INLINEABLE expPrec #-}
 
 instance ExpPrec 'Neg where
   expPrec _ = 2
+  {-# INLINEABLE expPrec #-}
 
 instance ExpPrec 'UniQ where
   expPrec _ = 0
+  {-# INLINEABLE expPrec #-}
   argPrec _ = 0
+  {-# INLINEABLE argPrec #-}
 
 instance ExpPrec 'ExtQ where
   expPrec _ = 0
+  {-# INLINEABLE expPrec #-}
   argPrec _ = 0
+  {-# INLINEABLE argPrec #-}
 
-toHaskellCode :: forall n. (KnownNat n) => Exp n -> String
-toHaskellCode f =
+toHaskellCode :: forall n. Exp n -> String
+toHaskellCode f@Exp{expNum = SNat} =
   Vector.withSizedList fvBasis $ \case
-    v@(sameNat pn . Vector.length' -> Just Refl) ->
+    v@((pn %~) . singByProxy . Vector.length' -> Proved Refl) ->
       let
         fvNames = liftA2 ((("fv_" <>) .) . fromMaybe) v (expContext f)
       in
@@ -113,7 +119,7 @@ toHaskellCode f =
       <> " for Exp "
       <> show (natVal pn)
   where
-    pn = Proxy @n
+    pn = SNat @n
     (fvBasis, bvNames) = splitAt (fromIntegral (natVal pn)) $ flip (:) <$> "" : fmap show [(0 :: Integer)..] <*> ['a'..'z']
 
     bindFvNames fvs =
@@ -146,10 +152,10 @@ toHaskellCode f =
     go (UniQ ms g) prec = goQuantifier ms g "UniQ " prec
     go (ExtQ ms g) prec = goQuantifier ms g "ExtQ " prec
 
-toFormatted :: forall n. (KnownNat n) => Exp n -> String
-toFormatted f =
+toFormatted :: forall n. Exp n -> String
+toFormatted f@Exp{expNum = SNat} =
   Vector.withSizedList fvBasis $ \case
-    v@(sameNat pn . Vector.length' -> Just Refl) ->
+    v@((pn %~) . singByProxy . Vector.length' -> Proved Refl) ->
       let
         fvNames = liftA2 ((("?fv_" <>) .) . fromMaybe) v (expContext f)
       in
@@ -161,7 +167,7 @@ toFormatted f =
       <> " for Exp "
       <> show (natVal pn)
   where
-    pn = Proxy @n
+    pn = SNat @n
     (fvBasis, bvNames) = splitAt (fromIntegral (natVal pn)) $ flip (:) <$> "" : fmap show [(0 :: Integer)..] <*> ['a'..'z']
 
     wrap = ("(" <>) . (<> ")")

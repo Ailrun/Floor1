@@ -33,6 +33,7 @@ library:
     - finite-typelits
     - ghc-prim
     - mtl
+    - singletons
     - vector-sized
   ## Library fields
   # exposed:

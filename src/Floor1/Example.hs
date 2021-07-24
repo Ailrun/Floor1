@@ -1,12 +1,13 @@
 {-# LANGUAGE DataKinds #-}
 module Floor1.Example where
 
-import qualified Data.Vector.Sized as Vector
+import           Data.Singletons.TypeLits
+import qualified Data.Vector.Sized        as Vector
 import           Floor1.Ast
 
 -- | Example expression 1
 exp1 :: Exp 2
-exp1 = Exp emptyExpContext $ \ctx ->
+exp1 = Exp SNat emptyExpContext $ \ctx ->
   let
     x = ctx `varCtxAccess` 0
     y = ctx `varCtxAccess` 1
@@ -15,7 +16,7 @@ exp1 = Exp emptyExpContext $ \ctx ->
 
 -- | Example expression 2
 exp2 :: Exp 2
-exp2 = Exp (Vector.cons (Just "name") emptyExpContext) $ \ctx ->
+exp2 = Exp SNat (Vector.cons (Just "name") emptyExpContext) $ \ctx ->
   let
     a = ctx `varCtxAccess` 0
     b = ctx `varCtxAccess` 1
