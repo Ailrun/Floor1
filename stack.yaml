@@ -43,6 +43,9 @@ packages:
 extra-deps:
 - singletons-2.7@sha256:558f88d376f30e8dabde9163a96d2ebcbe2fe533e08d20ab136eea91ad046da3
 
+ghc-options:
+  "$everything": -haddock
+
 # Override default flag values for local packages and extra-deps
 # flags: {}
 
